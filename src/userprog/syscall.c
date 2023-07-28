@@ -6,6 +6,7 @@
 #include "userprog/syscall.h"
 #include "userprog/process.h"
 #include "userprog/process.h"
+#include "filesys/cache.h"
 
 static void
 syscall_handler (struct intr_frame *);
@@ -15,7 +16,7 @@ syscall_init (void) {
     intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-void 
+void
 syscall_exit (struct intr_frame *, int);
 
 void
@@ -48,6 +49,43 @@ remove_syscall (struct intr_frame *, uint32_t *);
 
 void
 syscall_tell (struct intr_frame *, uint32_t *);
+
+void
+syscall_mkdir(struct intr_frame *, uint32_t *);
+
+void
+syscall_chdir(struct intr_frame *, uint32_t *);
+
+void
+syscall_readdir(struct intr_frame *, uint32_t *);
+
+void
+syscall_readdir(struct intr_frame *, uint32_t *);
+
+struct dir *
+get_file_dir (struct file *file)
+{
+    if (file == NULL) {
+        return NULL;
+    }
+
+    struct inode *inode = file_get_inode(file);
+    if (inode == NULL) {
+        return NULL;
+    }
+
+    if (!is_inode_dir(inode)) {
+        return NULL;
+    }
+
+    return (struct dir *) file;
+}
+
+void
+file_descriptor_inode(struct inode **inode, int fd, struct thread *trd)
+{
+    *inode = file_get_inode (trd->t_fds[fd]);
+}
 
 bool
 is_args_null (uint32_t *args, int args_size) {
@@ -132,7 +170,7 @@ syscall_exec (struct intr_frame *f, uint32_t args[])
         syscall_exit (f, -1);
         return;
     }
-    
+
     f->eax = process_execute (file_name);
     return;
 }
@@ -194,6 +232,30 @@ syscall_handler (struct intr_frame *f) {
         case SYS_TELL: // checkout current position in a file
             syscall_tell (f, args);
             break;
+        case SYS_MKDIR: //create directory
+            syscall_mkdir(f,args);
+            break;
+        case SYS_CHDIR: //change to a directory
+            syscall_chdir(f,args);
+            break;
+        case SYS_READDIR: //read dirs in a directory
+            syscall_readdir(f,args);
+            break;
+        case SYS_INUMBER: //get inumber
+            syscall_inumber(f,args);
+            break;
+        case SYS_ISDIR: //check is a inode is dir
+            syscall_isdir(f,args);
+            break;
+        case SYS_CACHE_HIT:
+            syscall_cache_hit (f, args);
+            break;
+        case SYS_CACHE_RESET:
+            syscall_cache_reset (f, args);
+            break;
+        case SYS_CACHE_WRITE_NUM:
+            syscall_cache_write_num (f, args);
+            break;
         default:
             break;
     }
@@ -220,14 +282,14 @@ syscall_write (struct intr_frame *f, uint32_t *args) {
         return;
     }
 
-    if (fd > 128 || fd < 0) {
+    if (fd > 128 || fd < 0 || fd == STDIN_FILENO) {
         printf ("%s: exit(-1)\n", &thread_current ()->name);
         handle_finishing (-1);
         thread_exit ();
     }
     struct thread *t = thread_current ();
     struct file *file = t->t_fds[fd];
-    if (file != NULL) {
+    if (get_file_dir (file) == NULL) {
         f->eax = file_write (file, string, size);
     } else {
         printf ("%s: exit(-1)\n", &thread_current ()->name);
@@ -244,7 +306,8 @@ syscall_create (struct intr_frame *f, uint32_t *args) {
         handle_finishing (-1);
         thread_exit ();
     }
-    f->eax = filesys_create ((const char *) args[1], args[2]);
+    const char *name = (const char *) args[1];
+    f->eax = filesys_create (name, args[2], false);
 }
 
 void
@@ -285,6 +348,24 @@ get_thread_available_fd (struct thread *t) {
     return -1;
 }
 
+void 
+syscall_cache_write_num (struct intr_frame *f, uint32_t *args)
+{
+    f->eax = get_num_writes ();
+}
+
+void 
+syscall_cache_hit (struct intr_frame *f, uint32_t *args)
+{
+    f->eax = get_hit();
+}
+
+void 
+syscall_cache_reset (struct intr_frame *f, uint32_t *args)
+{
+    reset_cache ();
+}
+
 void
 syscall_open (struct intr_frame *f, uint32_t *args) {
     if (!does_user_access_to_memory (args[1], 1)) {
@@ -310,7 +391,6 @@ syscall_close (struct intr_frame *f, uint32_t *args) {
         thread_exit ();
     }
 
-    /* Fail when closing a wrong fd. */
     if (args[1] < 0 || args[1] > 128 || args[1] < 3) {
         printf ("%s: exit(-1)\n", &thread_current()->name);
         handle_finishing (-1);
@@ -389,8 +469,7 @@ void
 syscall_tell (struct intr_frame *f, uint32_t *args) {
     int fd = args[1];
 
-    /* Fail when tell of a wrong fd or standard input or standard output */
-    if (fd >= 0 || fd < 128 || fd == 1) {
+    if (fd <= 2 || fd >= 128) {
         printf ("%s: exit(-1)\n", &thread_current ()->name);
         handle_finishing (-1);
         thread_exit ();
@@ -403,6 +482,107 @@ syscall_tell (struct intr_frame *f, uint32_t *args) {
         thread_exit ();
     }
 
-
     f->eax = file_tell (t->t_fds[fd]);
 }
+
+void
+syscall_mkdir (struct intr_frame *f, uint32_t* args)
+{
+    if (!does_user_access_to_memory(args[1], 1)) {
+        printf("%s: exit(-1)\n", &thread_current()->name);
+        handle_finishing(-1);
+        thread_exit();
+    }
+
+    const char *path = (const char *) args[1];
+
+    f->eax = filesys_create (path, 0, true);
+}
+
+void
+syscall_chdir (struct intr_frame *f, uint32_t* args){
+    char *name = (char *) args[1];
+    struct dir *dir = dir_open_directory (name);
+    if (dir != NULL)
+    {
+        dir_close (thread_current ()->curr_dir);
+        thread_current ()->curr_dir = dir;
+        f->eax = 1;
+    }
+    else {
+        f->eax = 0;
+    }
+}
+
+void
+syscall_readdir (struct intr_frame *f, uint32_t* args){
+    int fd = args[1];
+    char *name = (char *) args[2];
+    struct thread *curr_thread = thread_current();
+
+    if (curr_thread->t_fds[fd] == NULL) {
+        f->eax = 0;
+        return;
+    }
+
+    if (fd > 128 || fd < 0 || fd == 1)
+    {
+        f->eax = 0;
+        return;
+    }
+
+    struct dir *dir = get_file_dir (curr_thread->t_fds[fd]);
+    if (dir == NULL)
+    {
+        f->eax = false;
+        return;
+    }
+
+    f->eax = dir_readdir (dir, name);
+}
+
+void
+syscall_inumber (struct intr_frame *f, uint32_t* args){
+    struct inode *inode;
+    struct thread * curr_thread = thread_current();
+    int fd = args[1];
+
+    if (fd > 128 || fd < 0 || fd == 0 || fd == 1){
+        printf ("%s: exit(-1)\n", &thread_current ()->name);
+        handle_finishing (-1);
+        thread_exit ();
+    }
+
+    if (curr_thread->t_fds[fd] == NULL) {
+        printf ("%s: exit(-1)\n", &thread_current ()->name);
+        handle_finishing (-1);
+        thread_exit ();
+    }
+
+    file_descriptor_inode (&inode, args[1], curr_thread);
+
+    f->eax = inode_get_inumber (inode);
+}
+
+void
+syscall_isdir(struct intr_frame *f, uint32_t* args){
+    struct inode *inode;
+    struct thread * curr_thread = thread_current();
+    int fd = args[1];
+    if (fd > 128 || fd < 0 || fd == 0 || fd == 1){
+        printf ("%s: exit(-1)\n", &thread_current ()->name);
+        handle_finishing (-1);
+        thread_exit ();
+    }
+
+    if (curr_thread->t_fds[fd] == NULL) {
+        printf ("%s: exit(-1)\n", &thread_current ()->name);
+        handle_finishing (-1);
+        thread_exit ();
+    }
+
+    file_descriptor_inode (&inode, args[1], curr_thread);
+
+    f->eax = is_inode_dir (inode);
+}
+
