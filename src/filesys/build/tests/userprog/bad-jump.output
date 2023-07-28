@@ -1,0 +1,33 @@
+Copying tests/userprog/bad-jump to scratch partition...
+qemu-system-i386 -device isa-debug-exit -hda /tmp/MfZhgU3pNY.dsk -m 4 -net none -nographic -monitor null
+PiLo hda1
+Loading............
+Kernel command line: -q -f extract run bad-jump
+Pintos booting with 3,968 kB RAM...
+367 pages available in kernel pool.
+367 pages available in user pool.
+Calibrating timer...  137,011,200 loops/s.
+hda: 5,040 sectors (2 MB), model "QM00001", serial "QEMU HARDDISK"
+hda1: 194 sectors (97 kB), Pintos OS kernel (20)
+hda2: 4,096 sectors (2 MB), Pintos file system (21)
+hda3: 104 sectors (52 kB), Pintos scratch (22)
+filesys: using hda2
+scratch: using hda3
+Formatting file system...done.
+Boot complete.
+Extracting ustar archive from scratch device into file system...
+Putting 'bad-jump' into the file system...
+Erasing ustar archive...
+Executing 'bad-jump':
+(bad-jump) begin
+Page fault at 0: not present error reading page in user context.
+bad-jump: exit(-1)
+Execution of 'bad-jump' complete.
+Timer: 93 ticks
+Thread: 27 idle ticks, 63 kernel ticks, 3 user ticks
+hda2 (filesys): 238 reads, 208 writes
+hda3 (scratch): 103 reads, 2 writes
+Console: 931 characters output
+Keyboard: 0 keys pressed
+Exception: 1 page faults
+Powering off...
